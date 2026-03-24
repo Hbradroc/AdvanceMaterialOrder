@@ -3,9 +3,12 @@ __pycache__/
 *.pyo
 *.pyd
 
-# Local generated output
-AMO_Output_AllSheets.xlsx
+# Local data and binaries (do not commit)
+*.exe
+*.xlsx
+*.csv
+~$*.xlsx
 
-# Keep extracted reverse-engineering artifacts out of repo
+# Keep extracted artifacts out of repo
 amo_tool.exe_extracted/
 amo_tool.exe.extracted/
