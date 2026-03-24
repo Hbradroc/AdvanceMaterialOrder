@@ -6,7 +6,7 @@ This is a simple non GUI based script that reads BOM and lead-time data, then cr
 
 ## Files needed in this folder
 
-- `amo_tool.py`
+- `SYSCAD_AMO.py`
 - `allbom.xlsx` (exported BOM from SysCAD)
 - `component_db.csv` (component database)
 - `leadtime.csv` (lead time document)
@@ -39,6 +39,18 @@ This is a simple non GUI based script that reads BOM and lead-time data, then cr
    - Comp To date is blank or `99999999`
 6. Writes one AMO sheet per source sheet into `AMO_Output_AllSheets.xlsx`.
 
+## Dashboard layout (risk-first)
+
+The `AMO_Dashboard` sheet is organized in this order:
+
+1. `Breakdown by AMO Sheet`
+2. `No Safety Stock Items (<= 0)`
+3. `Low Safety Stock Items (<= 1.0)`
+4. `Longest Lead Time Items`
+5. `Supplier Quantities (Low Safety only)`
+
+Charts are placed on the right side of the dashboard to avoid overlap with table content.
+
 ## Run
 
 Install dependencies:
@@ -50,5 +62,5 @@ pip install pandas openpyxl
 Run:
 
 ```bash
-python amo_tool.py
+python SYSCAD_AMO.py
 ```
