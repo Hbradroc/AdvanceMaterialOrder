@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local generated output
+AMO_Output_AllSheets.xlsx
+
+# Keep extracted reverse-engineering artifacts out of repo
+amo_tool.exe_extracted/
+amo_tool.exe.extracted/
