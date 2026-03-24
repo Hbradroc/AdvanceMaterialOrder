@@ -7,9 +7,9 @@ This is a simple non GUI based script that reads BOM and lead-time data, then cr
 ## Files needed in this folder
 
 - `SYSCAD_AMO.py`
-- `allbom.xlsx` (exported BOM from SysCAD)
-- `component_db.csv` (component database)
-- `leadtime.csv` (lead time document)
+- `Genioxbom.xlsx` (exported BOM from SysCAD)
+- `Component Product Data.csv` (component from Qlikcloud or M3)
+- `Product Details and Lead Time` (QLIKcloud or M3)
 
 ## Required columns
 
