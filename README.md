@@ -13,7 +13,7 @@ This is a simple non GUI based script that reads BOM and lead-time data, then cr
 
 ## Required columns
 
-### `component_db.csv`
+### `Component Product Data.csv`
 - `Product no`
 - `Component no`
 - `Component name`
@@ -22,7 +22,7 @@ This is a simple non GUI based script that reads BOM and lead-time data, then cr
 - `Quantity`
 - `Comp To date`
 
-### `leadtime.csv`
+### `Product Details and Lead Time`
 - `Item no`
 - `Item name`
 - `Lead time`
