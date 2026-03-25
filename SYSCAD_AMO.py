@@ -2,10 +2,12 @@ import csv
 import re
 from collections import defaultdict
 from decimal import Decimal
+from urllib.parse import quote
 
 import pandas as pd
 from openpyxl.chart import BarChart, PieChart, Reference
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.chart.axis import Scaling
+from openpyxl.styles import Alignment, Font, NamedStyle, PatternFill
 
 
 THRESHOLD = 40
@@ -131,6 +133,57 @@ def safe_excel_sheet_name(name: str) -> str:
     name = re.sub(r"[:\\/?*\[\]]", "_", name or "").strip()
     name = name[:31] if len(name) > 31 else name
     return name or "Sheet"
+
+
+def generate_drawing_url(part_number: str) -> str:
+    """Infor OS Portal search URL by drawing/part number (same pattern as bom.py)."""
+    base_url = "https://mingle-portal.eu1.inforcloudsuite.com/v2/NQCCDG8W6XM542YD_PRD/8505a936-bb29-4566-ba88-174f04f22f65"
+    query_raw = f'/Drawing[@Drawing_number = "{part_number}"] SORTBY(@LASTCHANGEDTS DESCENDING)'
+    query_encoded = quote(query_raw, safe="")
+    logical_id_raw = "lid:/infor.daf.daf"
+    logical_id_encoded = quote(logical_id_raw, safe="")
+    favorite_context = f"?LogicalId={logical_id_encoded}&$query={query_encoded}&$state=0&$offset=0&$pid=&$screenId=daf_search"
+    favorite_context_encoded = quote(favorite_context, safe="")
+    logical_id = "lid%3A%2F%2Finfor.daf.daf"
+    return f"{base_url}?favoriteContext={favorite_context_encoded}&LogicalId={logical_id}"
+
+
+def ensure_drawing_hyperlink_style(wb):
+    """Named style 'Hyperlink' for drawing links (matches bom.py Excel output)."""
+    try:
+        hl = NamedStyle(name="Hyperlink")
+        hl.font = Font(underline="single", color="0563C1")
+        wb.add_named_style(hl)
+    except ValueError:
+        pass
+
+
+def set_cell_infor_drawing_link(cell, part: str):
+    """Display part number with Infor drawing portal hyperlink."""
+    part = str(part).strip()
+    if not part:
+        return
+    cell.value = part
+    cell.hyperlink = generate_drawing_url(part)
+    cell.style = "Hyperlink"
+
+
+def apply_part_number_drawing_hyperlinks(ws, header_row: int = 1, part_header: str = "Part number"):
+    """Add Infor drawing links on the Part number column for all data rows."""
+    if ws.max_row < header_row + 1 or ws.max_column < 1:
+        return
+    headers = [ws.cell(row=header_row, column=i).value for i in range(1, ws.max_column + 1)]
+    try:
+        col_idx = next(i for i, h in enumerate(headers) if h is not None and str(h).strip() == part_header)
+    except StopIteration:
+        return
+    col_num = col_idx + 1
+    for r in range(header_row + 1, ws.max_row + 1):
+        cell = ws.cell(row=r, column=col_num)
+        val = cell.value
+        if val in (None, ""):
+            continue
+        set_cell_infor_drawing_link(cell, val)
 
 
 def clean_allbom_sheet_df(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -487,7 +540,31 @@ def process_allbom_df(allbom_df, edges, parents_set, comp_details, product_comp_
     )
 
 
+def _style_column_bar_chart(chart: BarChart) -> None:
+    """Legible defaults for vertical column charts (qty by sheet)."""
+    chart.legend.position = "b"
+    chart.legend.overlay = False
+    chart.y_axis.scaling = Scaling(min=0)
+    chart.y_axis.majorGridlines = None
+    chart.gapWidth = 75
+
+
+def _style_horizontal_bar_chart(chart: BarChart) -> None:
+    """Legible defaults for horizontal bar charts (lead time by part)."""
+    chart.legend.position = "b"
+    chart.legend.overlay = False
+    chart.x_axis.scaling = Scaling(min=0)
+    chart.x_axis.majorGridlines = None
+    chart.gapWidth = 60
+
+
+def _style_pie_chart(chart: PieChart) -> None:
+    chart.legend.position = "r"
+    chart.legend.overlay = False
+
+
 def add_dashboard_sheet(wb):
+    ensure_drawing_hyperlink_style(wb)
     if "AMO_Dashboard" in wb.sheetnames:
         del wb["AMO_Dashboard"]
     ws = wb.create_sheet("AMO_Dashboard", 0)
@@ -562,7 +639,7 @@ def add_dashboard_sheet(wb):
     ws["A1"].font = white_font
     ws["A1"].fill = title_fill
     ws["A1"].alignment = Alignment(horizontal="left")
-    ws.merge_cells("A1:F1")
+    ws.merge_cells("A1:G1")
 
     total_items = len(all_rows)
     total_qty = round(sum(x["qty"] for x in all_rows), 3)
@@ -610,50 +687,54 @@ def add_dashboard_sheet(wb):
 
     ws["A18"] = "No Safety Stock Items (<= 0)"
     ws["A18"].font = bold_font
-    ws["A19"], ws["B19"], ws["C19"], ws["D19"], ws["E19"], ws["F19"] = (
+    ws["A19"], ws["B19"], ws["C19"], ws["D19"], ws["E19"], ws["F19"], ws["G19"] = (
         "Part number",
+        "Qty",
         "Component name",
         "Component description",
         "Supplier",
         "Sheet",
         "Lead time",
     )
-    for c in ("A19", "B19", "C19", "D19", "E19", "F19"):
+    for c in ("A19", "B19", "C19", "D19", "E19", "F19", "G19"):
         ws[c].font = bold_font
         ws[c].fill = header_fill
     row = 20
     for x in sorted(no_safety, key=lambda r: (-r["lead"], r["part"]))[:50]:
-        ws.cell(row=row, column=1, value=x["part"])
-        ws.cell(row=row, column=2, value=x.get("component_name", ""))
-        ws.cell(row=row, column=3, value=x.get("component_description", ""))
-        ws.cell(row=row, column=4, value=x["supplier"])
-        ws.cell(row=row, column=5, value=x["sheet"])
-        ws.cell(row=row, column=6, value=x["lead"])
-        row += 1
-
-    ws["A73"] = f"Low Safety Stock Items (<= {LOW_SAFETY_STOCK_THRESHOLD})"
-    ws["A73"].font = bold_font
-    ws["A74"], ws["B74"], ws["C74"], ws["D74"], ws["E74"], ws["F74"], ws["G74"] = (
-        "Part number",
-        "Safety stock",
-        "Component name",
-        "Component description",
-        "Supplier",
-        "Sheet",
-        "Lead time",
-    )
-    for c in ("A74", "B74", "C74", "D74", "E74", "F74", "G74"):
-        ws[c].font = bold_font
-        ws[c].fill = header_fill
-    row = 75
-    for x in sorted(low_safety, key=lambda r: (r["safety"], -r["lead"], r["part"]))[:50]:
-        ws.cell(row=row, column=1, value=x["part"])
-        ws.cell(row=row, column=2, value=x["safety"])
+        set_cell_infor_drawing_link(ws.cell(row=row, column=1), x["part"])
+        ws.cell(row=row, column=2, value=round(x["qty"], 3))
         ws.cell(row=row, column=3, value=x.get("component_name", ""))
         ws.cell(row=row, column=4, value=x.get("component_description", ""))
         ws.cell(row=row, column=5, value=x["supplier"])
         ws.cell(row=row, column=6, value=x["sheet"])
         ws.cell(row=row, column=7, value=x["lead"])
+        row += 1
+
+    ws["A73"] = f"Low Safety Stock Items (<= {LOW_SAFETY_STOCK_THRESHOLD})"
+    ws["A73"].font = bold_font
+    ws["A74"], ws["B74"], ws["C74"], ws["D74"], ws["E74"], ws["F74"], ws["G74"], ws["H74"] = (
+        "Part number",
+        "Safety stock",
+        "Qty",
+        "Component name",
+        "Component description",
+        "Supplier",
+        "Sheet",
+        "Lead time",
+    )
+    for c in ("A74", "B74", "C74", "D74", "E74", "F74", "G74", "H74"):
+        ws[c].font = bold_font
+        ws[c].fill = header_fill
+    row = 75
+    for x in sorted(low_safety, key=lambda r: (r["safety"], -r["lead"], r["part"]))[:50]:
+        set_cell_infor_drawing_link(ws.cell(row=row, column=1), x["part"])
+        ws.cell(row=row, column=2, value=x["safety"])
+        ws.cell(row=row, column=3, value=round(x["qty"], 3))
+        ws.cell(row=row, column=4, value=x.get("component_name", ""))
+        ws.cell(row=row, column=5, value=x.get("component_description", ""))
+        ws.cell(row=row, column=6, value=x["supplier"])
+        ws.cell(row=row, column=7, value=x["sheet"])
+        ws.cell(row=row, column=8, value=x["lead"])
         row += 1
 
     # 3) Longest lead-time items
@@ -672,14 +753,39 @@ def add_dashboard_sheet(wb):
         ws[c].fill = header_fill
     row = 130
     for x in longest_lead_items:
-        ws.cell(row=row, column=1, value=x["part"])
+        set_cell_infor_drawing_link(ws.cell(row=row, column=1), x["part"])
         ws.cell(row=row, column=2, value=x["lead"])
         ws.cell(row=row, column=3, value=round(x["qty"], 3))
         ws.cell(row=row, column=4, value=x["safety"])
         ws.cell(row=row, column=5, value=x["supplier"])
         row += 1
 
-    # Graph 1: qty by sheet
+    # Availability summary (feeds pie chart) — keep at row 153 so references stay stable.
+    ws["D153"] = "Availability"
+    ws["D153"].font = bold_font
+    ws["D154"], ws["E154"] = "Status", "Count"
+    ws["D154"].font = ws["E154"].font = bold_font
+    ws["D154"].fill = ws["E154"].fill = header_fill
+    ws["D155"], ws["E155"] = "Available", available_count
+    ws["D156"], ws["E156"] = "Critical", critical_count
+
+    # Charts: column F stays beside KPIs/tables (A–E) so they are visible without scrolling right.
+    CHART_COL_PIE = "F2"
+    CHART_COL_BAR_SHEET = "F14"
+    CHART_COL_BAR_LEAD = "F28"
+
+    pie = PieChart()
+    pie.title = "Available vs Critical Items"
+    pie_data = Reference(ws, min_col=5, min_row=154, max_row=156)
+    pie_labels = Reference(ws, min_col=4, min_row=155, max_row=156)
+    pie.add_data(pie_data, titles_from_data=True)
+    pie.set_categories(pie_labels)
+    pie.height = 7.5
+    pie.width = 11
+    pie.style = 10
+    _style_pie_chart(pie)
+    ws.add_chart(pie, CHART_COL_PIE)
+
     if sheet_stats:
         bar_sheet = BarChart()
         bar_sheet.title = "Qty by AMO Sheet"
@@ -692,9 +798,10 @@ def add_dashboard_sheet(wb):
         cats_sheet = Reference(ws, min_col=1, min_row=10, max_row=max_row)
         bar_sheet.add_data(data_sheet, titles_from_data=True)
         bar_sheet.set_categories(cats_sheet)
-        bar_sheet.height = 6
-        bar_sheet.width = 9
-        ws.add_chart(bar_sheet, "L3")
+        bar_sheet.height = 8.5
+        bar_sheet.width = 14
+        _style_column_bar_chart(bar_sheet)
+        ws.add_chart(bar_sheet, CHART_COL_BAR_SHEET)
 
     # 4) Supplier quantities for low-priority-risk items only
     supplier_low_qty = defaultdict(float)
@@ -713,7 +820,6 @@ def add_dashboard_sheet(wb):
         ws.cell(row=row, column=2, value=round(q, 3))
         row += 1
 
-    # Graph-only area on the right side
     if longest_lead_items:
         bar2 = BarChart()
         bar2.title = "Longest Lead Time Items"
@@ -726,31 +832,14 @@ def add_dashboard_sheet(wb):
         cats2 = Reference(ws, min_col=1, min_row=130, max_row=max_row)
         bar2.add_data(data2, titles_from_data=True)
         bar2.set_categories(cats2)
-        bar2.height = 7
-        bar2.width = 9
-        ws.add_chart(bar2, "L21")
-
-    ws["D153"] = "Availability"
-    ws["D153"].font = bold_font
-    ws["D154"], ws["E154"] = "Status", "Count"
-    ws["D154"].font = ws["E154"].font = bold_font
-    ws["D154"].fill = ws["E154"].fill = header_fill
-    ws["D155"], ws["E155"] = "Available", available_count
-    ws["D156"], ws["E156"] = "Critical", critical_count
-    pie = PieChart()
-    pie.title = "Available vs Critical Items"
-    pie_data = Reference(ws, min_col=5, min_row=154, max_row=156)
-    pie_labels = Reference(ws, min_col=4, min_row=155, max_row=156)
-    pie.add_data(pie_data, titles_from_data=True)
-    pie.set_categories(pie_labels)
-    pie.height = 6
-    pie.width = 8
-    pie.style = 10
-    ws.add_chart(pie, "L39")
+        bar2.height = 10
+        bar2.width = 16
+        _style_horizontal_bar_chart(bar2)
+        ws.add_chart(bar2, CHART_COL_BAR_LEAD)
 
     ws.column_dimensions["A"].width = 26
     ws.column_dimensions["B"].width = 12
-    ws.column_dimensions["C"].width = 10
+    ws.column_dimensions["C"].width = 12
     ws.column_dimensions["D"].width = 12
     ws.column_dimensions["E"].width = 20
     ws.column_dimensions["F"].width = 22
@@ -759,6 +848,9 @@ def add_dashboard_sheet(wb):
     ws.column_dimensions["I"].width = 30
     ws.column_dimensions["J"].width = 22
     ws.column_dimensions["K"].width = 22
+
+    # Keep title, KPIs, and sheet breakdown header visible while scrolling detail tables.
+    ws.freeze_panes = "A10"
 
 
 def main():
@@ -798,6 +890,11 @@ def main():
     from openpyxl import load_workbook
 
     wb = load_workbook(output_xlsx)
+    ensure_drawing_hyperlink_style(wb)
+    for ws in wb.worksheets:
+        apply_part_number_drawing_hyperlinks(ws)
+    print("Applied Infor drawing portal hyperlinks on Part number cells (AMO sheets).")
+
     for ws in wb.worksheets:
         if ws.max_row < 2 or ws.max_column < 1:
             continue
@@ -813,7 +910,7 @@ def main():
 
     wb.save(output_xlsx)
     print("Applied filter Safety stock = 0 to all AMO sheets.")
-    print("Added AMO_Dashboard with charts.")
+    print("Added AMO_Dashboard with charts; part numbers link to Infor drawings where listed.")
 
 
 if __name__ == "__main__":
